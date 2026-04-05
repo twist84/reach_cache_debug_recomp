@@ -143,3 +143,66 @@ namespace rex
 }
 
 // BLAM!
+
+REX_PPC_EXTERN_IMPORT(XMemGetPageSize);
+
+DWORD XMemGetPageSize(DWORD address)
+{
+	return REX_PPC_INVOKE(XMemGetPageSize, address);
+}
+
+REX_PPC_HOOK(memset);
+REX_PPC_HOOK(memcpy);
+REX_PPC_HOOK(memmove);
+
+// k_tag_cache_minimum_address	0xA0000000
+// k_tag_cache_maximum_address	0xBFC00000
+
+long volatile g_allocation_reserve_adjustment = 0;
+
+REX_PPC_EXTERN_IMPORT(physical_memory_compute_allocation_bounds);
+REX_PPC_EXTERN_IMPORT(physical_memory_query_bounds);
+REX_PPC_EXTERN_IMPORT(physical_memory_system_malloc);
+
+void physical_memory_compute_allocation_bounds(void** out_base_address, unsigned long* out_allocation_size);
+void physical_memory_query_bounds(unsigned long physical_memory_base_address, unsigned long physical_memory_query_address, unsigned long* out_physical_memory_start, unsigned long* out_physical_memory_end);
+static void* physical_memory_system_malloc(unsigned long size, void* expected_address, unsigned long memory_protection);
+
+REX_PPC_HOOK(physical_memory_compute_allocation_bounds);
+REX_PPC_HOOK(physical_memory_query_bounds);
+
+void physical_memory_compute_allocation_bounds(void** out_base_address, unsigned long* out_allocation_size)
+{
+	//REX_PPC_INVOKE(physical_memory_compute_allocation_bounds, out_base_address, out_allocation_size);
+
+	REX_PPC_MEMBASE_PTR(base);
+
+	assert(out_base_address);
+	assert(out_allocation_size);
+
+	unsigned long physical_memory_start = 0;
+	unsigned long physical_memory_end = 0;
+	physical_memory_query_bounds(0xA0000000, 0xBFC00000, &physical_memory_start, &physical_memory_end);
+
+	if (physical_memory_end < 0xBFC00000)
+	{
+		*out_allocation_size = 0;
+		*out_base_address = nullptr;
+	}
+	else
+	{
+		*out_allocation_size = 0xBFC00000 - physical_memory_start - (g_allocation_reserve_adjustment + 0x4D00000);
+		void* base_address = memory->TranslateVirtual<void*>(0xBFC00000 - *out_allocation_size);
+		*out_base_address = base_address;
+	}
+}
+
+void physical_memory_query_bounds(unsigned long physical_memory_base_address, unsigned long physical_memory_query_address, unsigned long* out_physical_memory_start, unsigned long* out_physical_memory_end)
+{
+	REX_PPC_INVOKE(physical_memory_query_bounds, physical_memory_base_address, out_physical_memory_start, out_physical_memory_end);
+}
+
+static void* physical_memory_system_malloc(unsigned long size, void* expected_address, unsigned long memory_protection)
+{
+	return REX_PPC_INVOKE(physical_memory_system_malloc, size, expected_address, memory_protection);
+}
